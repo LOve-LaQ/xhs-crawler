@@ -305,7 +305,3 @@ MIT。
 ## 致谢
 
 感谢 [autoclaw-cc/xiaohongshu-skills](https://github.com/autoclaw-cc/xiaohongshu-skills) 提供的浏览器自动化底座。
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/image?repos=autoclaw-cc/xiaohongshu-skills&type=date&legend=top-left)](https://www.star-history.com/?repos=autoclaw-cc%2Fxiaohongshu-skills&type=date&legend=top-left)
