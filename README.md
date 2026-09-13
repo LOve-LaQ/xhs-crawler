@@ -2,19 +2,19 @@
 
 **小红书自动化 Skills + 自研桌面分析台。** 直接使用你已登录的浏览器和真实账号，以普通用户的方式操作小红书。
 
-本仓库基于开源项目 [autoclaw-cc/xiaohongshu-skills](https://github.com/autoclaw-cc/xiaohongshu-skills)（MIT）二次开发，由两部分组成：
+**XHS Insight** 是本仓库的桌面分析台，将底层自动化能力封装为可视化工作流，覆盖「采集 → 分析 → 创作 → 归档」全链路。由 曾煜 开发维护，基于 MIT 协议的开源项目 [autoclaw-cc/xiaohongshu-skills](https://github.com/autoclaw-cc/xiaohongshu-skills) 二次开发。
 
-| 部分 | 来源 | 说明 |
-|------|------|------|
-| `extension/` `scripts/` `skills/` | 上游 | 浏览器扩展、CDP 自动化引擎、Skills 定义。支持 [OpenClaw](https://github.com/anthropics/openclaw) 及所有兼容 `SKILL.md` 格式的 AI Agent 平台（如 Claude Code） |
-| `desktop/` `tests/` | 本仓库新增 | **XHS Insight** 桌面分析台，把上述自动化能力封装为可视化工作流 |
+| 部分 | 说明 |
+|------|------|
+| `desktop/` `tests/` | **XHS Insight** 桌面分析台，本仓库核心新增；含可视化界面、AI 分析与工作区归档 |
+| `extension/` `scripts/` `skills/` | 浏览器扩展、CDP 自动化引擎与 Skills 定义；支持 [OpenClaw](https://github.com/anthropics/openclaw) 及兼容 `SKILL.md` 的 AI Agent 平台（如 Claude Code） |
 
 > **⚠️ 使用建议**：虽然本项目使用真实的用户浏览器和账号环境，但仍建议**控制使用频率**，避免短时间内大量操作。频繁的自动化行为可能触发小红书的风控机制，导致账号受限。
 
 
 ## 桌面分析台（XHS Insight）
 
-本仓库的核心新增部分。上游交付的是「给 AI Agent 调用的能力」，XHS Insight 把它变成**给人用的可视化工作台**——无需手写命令，通过界面完成「采集 → 分析 → 创作 → 归档」的完整链路。
+本仓库的核心。XHS Insight 把底层自动化能力变成**给人用的可视化工作台**——无需手写命令，通过界面完成「采集 → 分析 → 创作 → 归档」的完整链路。
 
 约 3900 行代码，39 项自动化测试。
 
@@ -25,7 +25,7 @@
 | 界面 | PySide6（Qt 6）；`QThreadPool + QRunnable` 承载后台任务，界面不阻塞 |
 | 存储 | SQLite 单文件本地库，启动时自动建表，兼容旧库字段迁移 |
 | AI | DeepSeek API（OpenAI 兼容协议，`base_url` / `model` 可自定义） |
-| 采集 | 复用上游 CLI 与 Chrome Extension Bridge（WebSocket） |
+| 采集 | 调用 CLI 引擎与 Chrome Extension Bridge（WebSocket） |
 | 导出 | JSON + Excel / HTML / Markdown，按任务归档 |
 | 质量 | pytest 39 项 + Ruff（E/W/F/I/N/UP/B/SIM/RUF） |
 
@@ -58,7 +58,7 @@ python -m desktop
 
 ## 功能概览
 
-> 以下为**上游底座**提供的能力，XHS Insight 直接复用。
+> 以下为底层自动化能力，XHS Insight 可直接调用，也可作为独立 Skills 使用。
 
 | 技能 | 说明 | 核心能力 |
 |------|------|----------|
@@ -90,23 +90,23 @@ Agent 会自动执行：搜索 → 筛选图文 → 按点赞排序 → 收藏 �
 
 ```
 # OpenClaw 示例
-<openclaw-project>/skills/xiaohongshu-skills/
+<openclaw-project>/skills/xhs-crawler/
 
 # Claude Code 示例
-<your-project>/.claude/skills/xiaohongshu-skills/
+<your-project>/.claude/skills/xhs-crawler/
 ```
 
 **方法二：Git Clone**
 
 ```bash
 cd <your-agent-project>/skills/
-git clone https://github.com/autoclaw-cc/xiaohongshu-skills.git
+git clone https://github.com/LOve-LaQ/xhs-crawler.git
 ```
 
 2. 安装 Python 依赖：
 
 ```bash
-cd xiaohongshu-skills
+cd xhs-crawler
 uv sync
 ```
 
@@ -232,7 +232,7 @@ xhs-crawler/
 │   ├── ai_service.py               # DeepSeek 客户端与分析提示词
 │   ├── storage.py                  # SQLite 持久化（6 张表）
 │   ├── workspace.py                # 工作区归档与 Excel 导出
-│   ├── xhs_adapter.py              # 上游 CLI 适配层
+│   ├── xhs_adapter.py              # CLI 适配层
 │   ├── models.py                   # 数据模型与 AI 脱敏
 │   ├── pipeline.py                 # 批量采集容错
 │   ├── config.py                   # 应用配置
