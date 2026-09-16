@@ -1,18 +1,10 @@
 name: Release
 
+# 仅在推送 v* 标签（或手动触发）时发布，避免每次 push 到 main 都产生一个 Release
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths-ignore:
-      - "CLAUDE.md"
-      - "PROMPT.md"
-      - "README.md"
-      - ".gitignore"
-      - ".claude/**"
-      - ".github/**"
-      - "tests/**"
-      - "docs/**"
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -24,19 +16,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract version and generate tag
+      - name: Resolve tag
         id: version
         run: |
-          VERSION=$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
-          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
-          TAG="v${VERSION}-${SHORT_SHA}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            VERSION=$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
+            TAG="v${VERSION}-$(echo "$GITHUB_SHA" | cut -c1-7)"
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Check if tag exists
+      # 原来检查的是「tag 是否已存在」。改成 tag 触发后该 tag 必然已存在，
+      # 会导致发布被永久跳过；因此改成检查「Release 是否已存在」，保留不重复发布的原意
+      - name: Check if release exists
         id: check_tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git ls-remote --tags origin "refs/tags/${{ steps.version.outputs.tag }}" | grep -q .; then
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
