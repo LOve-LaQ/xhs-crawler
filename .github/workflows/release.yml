@@ -45,12 +45,17 @@ jobs:
         if: steps.check_tag.outputs.exists == 'false'
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          PREFIX="xiaohongshu-skills-${TAG}"
+          PREFIX="xhs-crawler-${TAG}"
+          # desktop/ 与 extension/ 必须一并打包：包内 pyproject.toml 声明了
+          # xhs-insight = desktop.main:main 且 packages = ["desktop"]，
+          # 缺失会让下载者执行 uv sync 时因找不到 desktop 包而构建失败；
+          # extension/ 是桌面端浏览器桥接的运行前提
           tar czf "${PREFIX}.tar.gz" \
             --transform "s,^,${PREFIX}/," \
-            skills/ scripts/ SKILL.md pyproject.toml uv.lock LICENSE README.md
+            --exclude='__pycache__' --exclude='*.pyc' \
+            skills/ scripts/ desktop/ extension/ SKILL.md pyproject.toml uv.lock LICENSE README.md
           zip -r "${PREFIX}.zip" \
-            skills/ scripts/ SKILL.md pyproject.toml uv.lock LICENSE README.md \
+            skills/ scripts/ desktop/ extension/ SKILL.md pyproject.toml uv.lock LICENSE README.md \
             -x '*.pyc' '__pycache__/*'
 
       - name: Create GitHub Release
@@ -59,7 +64,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          PREFIX="xiaohongshu-skills-${TAG}"
+          PREFIX="xhs-crawler-${TAG}"
           gh release create "$TAG" \
             "${PREFIX}.tar.gz" \
             "${PREFIX}.zip" \
