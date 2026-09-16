@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    env:
+      # 测试用 Qt 的 offscreen 平台插件，无需真实显示器
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # PySide6 轮子自带 Qt 库，但仍依赖少量系统库；offscreen 模式不需要 X11
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Check formatting (ruff)
+        run: uv run ruff format --check .
+
+      - name: Test (pytest)
+        run: uv run pytest -q

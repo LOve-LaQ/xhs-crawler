@@ -1,5 +1,7 @@
 # xhs-crawler
 
+[![CI](https://github.com/LOve-LaQ/xhs-crawler/actions/workflows/ci.yml/badge.svg)](https://github.com/LOve-LaQ/xhs-crawler/actions/workflows/ci.yml)
+
 **小红书自动化 Skills + 自研桌面分析台。** 直接使用你已登录的浏览器和真实账号，以普通用户的方式操作小红书。
 
 **XHS Insight** 是本仓库的桌面分析台，将底层自动化能力封装为可视化工作流，覆盖「采集 → 分析 → 创作 → 归档」全链路。由 曾煜 开发维护，基于 MIT 协议的开源项目 [autoclaw-cc/xiaohongshu-skills](https://github.com/autoclaw-cc/xiaohongshu-skills) 二次开发。
@@ -16,18 +18,18 @@
 
 本仓库的核心。XHS Insight 把底层自动化能力变成**给人用的可视化工作台**——无需手写命令，通过界面完成「采集 → 分析 → 创作 → 归档」的完整链路。
 
-约 3900 行代码，39 项自动化测试。
+约 4200 行代码，40 项自动化测试。
 
 ### 技术栈
 
 | 层次 | 选型 |
 |------|------|
-| 界面 | PySide6（Qt 6）；`QThreadPool + QRunnable` 承载后台任务，界面不阻塞 |
+| 界面 | PySide6（Qt 6）；`desktop/ui/` 按职责拆分为多个 Mixin，`main.py` 仅做组装；`QThreadPool + QRunnable` 承载后台任务，界面不阻塞 |
 | 存储 | SQLite 单文件本地库，启动时自动建表，兼容旧库字段迁移 |
 | AI | DeepSeek API（OpenAI 兼容协议，`base_url` / `model` 可自定义） |
 | 采集 | 调用 CLI 引擎与 Chrome Extension Bridge（WebSocket） |
 | 导出 | JSON + Excel / HTML / Markdown，按任务归档 |
-| 质量 | pytest 39 项 + Ruff（E/W/F/I/N/UP/B/SIM/RUF） |
+| 质量 | 40 项 pytest + Ruff（lint / format），CI 每次 push 自动校验 |
 
 ### 功能模块
 
@@ -43,8 +45,8 @@
 ```bash
 uv sync
 uv run xhs-insight
-# 或
-python -m desktop
+# 若未安装入口点，也可用模块方式启动
+uv run python -m desktop
 ```
 
 首次启动后，在「工作区设置」中填写 DeepSeek API 地址、API Key 和模型。实时采集需要 Chrome 已加载本项目的 `extension/`。
@@ -228,7 +230,20 @@ python scripts/cli.py post-comment --feed-id FEED_ID --xsec-token XSEC_TOKEN --c
 ```
 xhs-crawler/
 ├── desktop/                        # 桌面分析台（本仓库新增）
-│   ├── main.py                     # 主窗口、侧边栏与全部页面
+│   ├── main.py                     # 入口：MainWindow 组装 + 启动
+│   ├── ui/                         # 界面层，按职责拆分
+│   │   ├── builder.py              #   页面装配（侧边栏、各页面与面板）
+│   │   ├── interaction.py          #   导航、状态栏、Worker 调度、剪贴板
+│   │   ├── collection.py           #   采集：任务、搜索、笔记与评论拉取
+│   │   ├── comments.py             #   评论运营：建议、评分、定位
+│   │   ├── qa.py                   #   Q&A 资料库
+│   │   ├── analysis.py             #   竞品分析与批量草稿
+│   │   ├── settings_ops.py         #   设置与 Bridge 连接状态
+│   │   ├── widgets.py              #   Worker / DragSplitter 等通用控件
+│   │   ├── formatting.py           #   表格、评分与富文本格式化
+│   │   ├── report_render.py        #   报告渲染（HTML / Markdown）
+│   │   ├── settings_dialog.py      #   工作区设置对话框
+│   │   └── style.py                #   全局 QSS
 │   ├── ai_service.py               # DeepSeek 客户端与分析提示词
 │   ├── storage.py                  # SQLite 持久化（6 张表）
 │   ├── workspace.py                # 工作区归档与 Excel 导出
@@ -237,7 +252,7 @@ xhs-crawler/
 │   ├── pipeline.py                 # 批量采集容错
 │   ├── config.py                   # 应用配置
 │   ├── assets.py                   # 本地图片扫描
-│   └── __main__.py                 # python -m desktop 入口
+│   └── __main__.py                 # 模块入口（-m desktop）
 ├── extension/                      # Chrome 扩展
 │   ├── manifest.json
 │   ├── background.js
@@ -272,10 +287,9 @@ xhs-crawler/
 │   ├── xhs-explore/SKILL.md
 │   ├── xhs-interact/SKILL.md
 │   └── xhs-content-ops/SKILL.md
-├── tests/                          # desktop 单元测试（39 项）
+├── tests/                          # desktop 单元测试（40 项）
+├── .github/workflows/              # ci.yml（lint + test）与 release.yml
 ├── SKILL.md                        # 技能统一入口（路由到子技能）
-├── AGENTS.md                       # Agent 协作约定
-├── CLAUDE.md                       # 项目开发指南
 ├── pyproject.toml
 └── README.md
 ```
@@ -283,7 +297,7 @@ xhs-crawler/
 ## 开发
 
 ```bash
-uv sync                    # 安装依赖
+uv sync --extra dev        # 安装依赖（含 ruff / pytest 开发工具）
 uv run ruff check .        # Lint 检查
 uv run ruff format .       # 代码格式化
 uv run pytest              # 运行测试
@@ -294,6 +308,20 @@ uv run pytest              # 运行测试
 ```powershell
 $env:QT_QPA_PLATFORM='offscreen'; uv run pytest -q
 ```
+
+### 持续集成
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 在每次 push / PR 到 `main` 时执行四步：
+
+1. `uv sync --locked --extra dev` —— 校验锁文件一致性并在其上安装依赖
+2. `uv run ruff check .` —— Lint 检查
+3. `uv run ruff format --check .` —— 格式检查
+4. `uv run pytest -q` —— 运行单元测试（Qt offscreen 无头模式）
+
+测试不联网、不启动真实浏览器，秒级完成，可直接作为 PR 合入卡点。
+
+> `scripts/` 与 `extension/` 为上游开源代码，已在 `[tool.ruff] extend-exclude` 中排除，
+> 以保留上游基线原貌，让「上游基线」与「本仓库新增」的边界在 diff 中始终清晰。
 
 ## License
 
