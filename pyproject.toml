@@ -1,5 +1,5 @@
 [project]
-name = "xiaohongshu-skills"
+name = "xhs-crawler"
 version = "0.1.0"
 description = "小红书自动化 Skills，基于 CDP 浏览器自动化"
 readme = "README.md"
@@ -15,12 +15,6 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[project.optional-dependencies]
-dev = [
-    "ruff>=0.9.0",
-    "pytest>=8.0",
-]
 
 [tool.ruff]
 target-version = "py311"
@@ -56,7 +50,7 @@ ignore = [
 "desktop/ui/*.py" = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["xiaohongshu_skills"]
+known-first-party = ["desktop"]
 
 [project.scripts]
 xhs-insight = "desktop.main:main"
@@ -70,5 +64,6 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "ruff>=0.9.0",
     "pytest>=9.0.2",
 ]

@@ -37,7 +37,7 @@ jobs:
           cache-dependency-glob: "uv.lock"
 
       - name: Sync dependencies
-        run: uv sync --locked --extra dev
+        run: uv sync --locked
 
       - name: Lint (ruff)
         run: uv run ruff check .
