@@ -236,8 +236,5 @@ PROJECT_HANDOFF.md
 /AGENTS.md
 /CLAUDE.md
 
-# 单元测试（仅本地运行）
-/tests/
-
 # 早期界面原型稿
 /prototype/
