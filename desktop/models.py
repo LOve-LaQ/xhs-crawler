@@ -89,6 +89,19 @@ class AnalysisReport:
             raw=data,
         )
 
+    def add_finding(self, text: str) -> None:
+        """追写一条结论，并同步写回 raw。
+
+        save_report 持久化的就是 raw，只改 key_findings 会在落库后丢失；
+        两处同写才能保证「报告已归档」时这条口径仍在。
+        """
+        if not text:
+            return
+        self.key_findings.append(text)
+        findings = self.raw.setdefault("keyFindings", [])
+        if isinstance(findings, list):
+            findings.append(text)
+
 
 def _as_string_list(value: Any) -> list[str]:
     if isinstance(value, list):

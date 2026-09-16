@@ -110,7 +110,7 @@ class AnalysisMixin:
     def _on_analysis_result(self, result: tuple[list[FeedNote], AnalysisReport, list[str]]) -> None:
         notes, report, skipped = result
         if skipped:
-            report.key_findings.append(
+            report.add_finding(
                 f"有 {len(skipped)} 篇样本详情未能访问，报告基于其余 {len(notes)} 篇生成。"
             )
         self.current_notes = [
