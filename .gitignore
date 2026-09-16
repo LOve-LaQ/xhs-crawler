@@ -225,3 +225,19 @@ comment.txt
 
 # 内部交接文档（含本地路径与私有开发记录）
 PROJECT_HANDOFF.md
+
+# ===== 本地私有内容（保留在本地，不推送上游）=====
+
+# 面试复习笔记与内部架构/设计文档
+/docs/desktop-架构精读与面试问答.md
+/docs/superpowers/
+
+# 面向 AI agent 的项目协作说明
+/AGENTS.md
+/CLAUDE.md
+
+# 单元测试（仅本地运行）
+/tests/
+
+# 早期界面原型稿
+/prototype/
