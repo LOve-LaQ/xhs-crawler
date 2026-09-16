@@ -41,18 +41,16 @@ def write_xlsx(
         f'<col min="{i}" max="{i}" width="{width}" customWidth="1"/>'
         for i, width in enumerate(widths, start=1)
     )
-    row_xml = [
-        f'<row r="1">{"".join(_cell(value, 1) for value in headers)}</row>'
-    ]
+    row_xml = [f'<row r="1">{"".join(_cell(value, 1) for value in headers)}</row>']
     for row_index, row in enumerate(rows, start=2):
         row_xml.append(
             f'<row r="{row_index}" ht="{data_row_height}" customHeight="1">'
-            f'{"".join(_cell(value, 2) for value in row)}</row>'
+            f"{''.join(_cell(value, 2) for value in row)}</row>"
         )
     worksheet = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        f'<cols>{width_xml}</cols><sheetData>{"".join(row_xml)}</sheetData></worksheet>'
+        f"<cols>{width_xml}</cols><sheetData>{''.join(row_xml)}</sheetData></worksheet>"
     )
     workbook = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -68,20 +66,20 @@ def write_xlsx(
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
         '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
         '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-        '</Types>'
+        "</Types>"
     )
     root_rels = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-        '</Relationships>'
+        "</Relationships>"
     )
     workbook_rels = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
         '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-        '</Relationships>'
+        "</Relationships>"
     )
     styles = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -122,18 +120,20 @@ def _full_report_text(report: AnalysisReport) -> str:
     if structure:
         sections.append(
             "内容结构："
-            f"开头 { '、'.join(map(str, structure.get('openingHooks', []))) or '暂无'}；"
+            f"开头 {'、'.join(map(str, structure.get('openingHooks', []))) or '暂无'}；"
             f"正文 {structure.get('bodyPattern', '暂无')}；"
-            f"结尾 { '、'.join(map(str, structure.get('endingHooks', []))) or '暂无'}"
+            f"结尾 {'、'.join(map(str, structure.get('endingHooks', []))) or '暂无'}"
         )
     if tags:
         sections.append(
             "标签策略："
-            f"常用标签 { '、'.join(map(str, tags.get('commonTags', []))) or '暂无'}；"
-            f"建议 { '、'.join(map(str, tags.get('suggestions', []))) or '暂无'}"
+            f"常用标签 {'、'.join(map(str, tags.get('commonTags', []))) or '暂无'}；"
+            f"建议 {'、'.join(map(str, tags.get('suggestions', []))) or '暂无'}"
         )
     if cover:
-        sections.append("封面风格：" + "、".join(map(str, cover.get("commonStyles", []))) or "封面风格：暂无")
+        sections.append(
+            "封面风格：" + "、".join(map(str, cover.get("commonStyles", []))) or "封面风格：暂无"
+        )
     if report.recommendations:
         sections.append("下一步建议：" + "；".join(report.recommendations))
     return "\n".join(sections)
@@ -181,14 +181,28 @@ class WorkspaceArchive:
         if not folder:
             return
         (folder / "notes.json").write_text(
-            json.dumps([note.to_dict(include_secret=False) for note in notes], ensure_ascii=False, indent=2),
+            json.dumps(
+                [note.to_dict(include_secret=False) for note in notes], ensure_ascii=False, indent=2
+            ),
             encoding="utf-8",
         )
         write_xlsx(
             folder / "notes.xlsx",
             "样本",
             ["笔记ID", "标题", "作者", "正文", "点赞", "收藏", "评论", "标签"],
-            [[note.note_id, note.title, note.author, note.body, note.liked_count, note.collected_count, note.comment_count, "、".join(note.tags)] for note in notes],
+            [
+                [
+                    note.note_id,
+                    note.title,
+                    note.author,
+                    note.body,
+                    note.liked_count,
+                    note.collected_count,
+                    note.comment_count,
+                    "、".join(note.tags),
+                ]
+                for note in notes
+            ],
         )
 
     def save_report(
@@ -198,7 +212,8 @@ class WorkspaceArchive:
         if not folder:
             return
         (folder / "report.json").write_text(
-            json.dumps(report.raw or report.__dict__, ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps(report.raw or report.__dict__, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
         analyses = {
             str(item.get("noteId", "")): str(item.get("analysis") or item.get("claim") or "")
@@ -258,8 +273,7 @@ class WorkspaceArchive:
             if not isinstance(factors, dict):
                 return ""
             return "；".join(
-                f"{factor_names.get(str(key), key)}：{value}"
-                for key, value in factors.items()
+                f"{factor_names.get(str(key), key)}：{value}" for key, value in factors.items()
             )
 
         rows = [
@@ -308,7 +322,16 @@ class WorkspaceArchive:
             folder / "drafts.xlsx",
             "草稿方案",
             ["方案", "标题", "正文", "标签", "配图建议"],
-            [[index + 1, item.get("title", ""), item.get("content", ""), "、".join(map(str, item.get("tags", []))), item.get("cover_suggestion", "")] for index, item in enumerate(drafts)],
+            [
+                [
+                    index + 1,
+                    item.get("title", ""),
+                    item.get("content", ""),
+                    "、".join(map(str, item.get("tags", []))),
+                    item.get("cover_suggestion", ""),
+                ]
+                for index, item in enumerate(drafts)
+            ],
         )
 
     def copy_assets(self, task_id: str, topic: str, assets: list[Path]) -> None:
@@ -342,7 +365,10 @@ class WorkspaceArchive:
             folder / "qa_library.xlsx",
             "问答对库",
             ["问题", "标准答案", "关键词", "更新时间"],
-            [[item["question"], item["answer"], item["keywords"], item["updated_at"]] for item in public_entries],
+            [
+                [item["question"], item["answer"], item["keywords"], item["updated_at"]]
+                for item in public_entries
+            ],
             column_widths=[32, 56, 24, 24],
             data_row_height=58,
         )

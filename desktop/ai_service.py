@@ -155,18 +155,14 @@ class AnalysisService:
     def generate_draft(self, topic: str, report: AnalysisReport) -> dict[str, Any]:
         if self.client is None:
             raise AIServiceError("尚未配置 DeepSeek 客户端")
-        report_json = json.dumps(
-            sanitize_for_ai(report.raw or report.__dict__), ensure_ascii=False
-        )
+        report_json = json.dumps(sanitize_for_ai(report.raw or report.__dict__), ensure_ascii=False)
         prompt = (
             "请根据以下小红书分析报告生成一条原创图文草稿。\n"
             f"主题：{topic}\n"
             f"报告：{report_json}\n"
             '只返回 JSON：{"title":"20字以内标题","content":"正文","tags":["标签1","标签2"]}'
         )
-        return parse_json_response(
-            self.client.complete([{"role": "user", "content": prompt}])
-        )
+        return parse_json_response(self.client.complete([{"role": "user", "content": prompt}]))
 
     def generate_product_drafts(
         self,
@@ -179,9 +175,7 @@ class AnalysisService:
     ) -> dict[str, Any]:
         if self.client is None:
             raise AIServiceError("尚未配置 DeepSeek 客户端")
-        report_json = json.dumps(
-            sanitize_for_ai(report.raw or report.__dict__), ensure_ascii=False
-        )
+        report_json = json.dumps(sanitize_for_ai(report.raw or report.__dict__), ensure_ascii=False)
         samples_json = json.dumps(
             [
                 sanitize_for_ai(note.to_dict(include_secret=False))
@@ -212,9 +206,7 @@ class AnalysisService:
             "只返回严格 JSON，不要 Markdown 代码块。\n"
             f"输出结构：{json.dumps(schema, ensure_ascii=False)}"
         )
-        return parse_json_response(
-            self.client.complete([{"role": "user", "content": prompt}])
-        )
+        return parse_json_response(self.client.complete([{"role": "user", "content": prompt}]))
 
     def generate_comment_replies(
         self,
