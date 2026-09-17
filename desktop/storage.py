@@ -15,6 +15,15 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def _ensure_column(
+    connection: sqlite3.Connection, table: str, column: str, definition: str
+) -> None:
+    """幂等补列：SQLite 不支持 ADD COLUMN IF NOT EXISTS。"""
+    columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 class LocalStore:
     def __init__(self, path: str | Path | None = None) -> None:
         if path is None:
@@ -25,8 +34,18 @@ class LocalStore:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path)
+        # timeout 是拿不到锁时的等待上限：后台线程（QThreadPool）写入的同时主线程可能
+        # 正在刷新任务列表，默认的 rollback journal 下写事务会阻塞读，超时即报
+        # database is locked，因此这里既放宽等待，也切到读写互不阻塞的 WAL。
+        connection = sqlite3.connect(self.path, timeout=5.0)
         connection.row_factory = sqlite3.Row
+        # WAL 是写入库文件的持久设置，设一次即长期生效；synchronous 则是每连接设置。
+        # 代价是库旁边会多出 -wal / -shm 两个文件：备份或拷贝时必须一起带走，
+        # 只复制 .db 会丢掉尚未 checkpoint 的最新数据。
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
+        # 外键默认关闭，不显式打开则下面所有 ON DELETE CASCADE 都是装饰。
+        connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     def _init_schema(self) -> None:
@@ -48,6 +67,9 @@ class LocalStore:
                     note_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     payload TEXT NOT NULL,
+                    collected_at TEXT NOT NULL DEFAULT '',
+                    last_seen_at TEXT NOT NULL DEFAULT '',
+                    run_id TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY (task_id, note_id),
                     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
                 );
@@ -91,21 +113,50 @@ class LocalStore:
                     keywords TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS collection_runs (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'running',
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL DEFAULT '',
+                    requested INTEGER NOT NULL DEFAULT 0,
+                    fetched INTEGER NOT NULL DEFAULT 0,
+                    failed INTEGER NOT NULL DEFAULT 0,
+                    message TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+                );
+                -- 采集日志是唯一会持续增长的表，两条索引分别服务「按任务查历史」
+                -- 与「全局按时间倒序巡察」；其余表的主键 / UNIQUE 已覆盖各自查询路径。
+                CREATE INDEX IF NOT EXISTS idx_collection_runs_task
+                    ON collection_runs(task_id, started_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_collection_runs_started
+                    ON collection_runs(started_at DESC);
+                -- 任务列表是唯一没有索引支撑的高频排序查询（updated_at DESC LIMIT）。
+                CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_at DESC);
                 """
             )
-            columns = {
-                row[1]
-                for row in connection.execute("PRAGMA table_info(comment_opportunities)").fetchall()
-            }
-            if "score" not in columns:
-                connection.execute(
-                    "ALTER TABLE comment_opportunities ADD COLUMN score INTEGER NOT NULL DEFAULT 0"
-                )
-            if "score_breakdown" not in columns:
-                connection.execute(
-                    "ALTER TABLE comment_opportunities ADD COLUMN score_breakdown "
-                    "TEXT NOT NULL DEFAULT '{}'"
-                )
+            # 老库缺列时补齐；新库由上面的建表语句直接建全，这里不会命中。
+            _ensure_column(
+                connection, "comment_opportunities", "score", "INTEGER NOT NULL DEFAULT 0"
+            )
+            _ensure_column(
+                connection, "comment_opportunities", "score_breakdown", "TEXT NOT NULL DEFAULT '{}'"
+            )
+            _ensure_column(connection, "notes", "collected_at", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(connection, "notes", "last_seen_at", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(connection, "notes", "run_id", "TEXT NOT NULL DEFAULT ''")
+            # 老数据无法还原真实采集时刻，用所属任务的创建时间回填：既是可解释的下界，
+            # 也保证「什么时候采集的」这一列不会留空。
+            connection.execute(
+                "UPDATE notes SET collected_at = COALESCE(NULLIF(collected_at, ''), "
+                "(SELECT created_at FROM tasks WHERE tasks.id = notes.task_id), '') "
+                "WHERE collected_at = ''"
+            )
+            connection.execute(
+                "UPDATE notes SET last_seen_at = collected_at WHERE last_seen_at = ''"
+            )
 
     def create_task(self, topic: str, task_type: str) -> str:
         task_id = uuid.uuid4().hex
@@ -155,12 +206,127 @@ class LocalStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def save_notes(self, task_id: str, notes: list[FeedNote]) -> None:
+    # --- 采集审计：回答「这份数据是什么时候、以什么方式采到的」 -----------------
+
+    def start_collection_run(self, task_id: str, action: str, source: str = "") -> str:
+        """登记一次采集动作，返回 run_id 供收尾时回填结果。"""
+        run_id = uuid.uuid4().hex
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO collection_runs(id, task_id, action, source, status, started_at)
+                VALUES (?, ?, ?, ?, 'running', ?)
+                """,
+                (run_id, task_id, action, source.strip(), _now()),
+            )
+        return run_id
+
+    def finish_collection_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        requested: int = 0,
+        fetched: int = 0,
+        failed: int = 0,
+        message: str = "",
+    ) -> None:
+        """收尾一次采集，status 取 success / failed / cancelled。"""
+        if not run_id:
+            return
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE collection_runs
+                SET status = ?, finished_at = ?, requested = ?, fetched = ?, failed = ?,
+                    message = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    _now(),
+                    max(0, int(requested)),
+                    max(0, int(fetched)),
+                    max(0, int(failed)),
+                    message,
+                    run_id,
+                ),
+            )
+
+    def list_collection_runs(
+        self, task_id: str | None = None, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        """采集日志，按开始时间倒序；不传 task_id 即全局巡察视图。"""
+        limited = max(1, int(limit))
+        with self._connect() as connection:
+            if task_id:
+                rows = connection.execute(
+                    "SELECT * FROM collection_runs WHERE task_id = ? "
+                    "ORDER BY started_at DESC, rowid DESC LIMIT ?",
+                    (task_id, limited),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM collection_runs ORDER BY started_at DESC, rowid DESC LIMIT ?",
+                    (limited,),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def collection_summary(self, task_id: str) -> dict[str, Any]:
+        """任务的采集概览：批次次数、成败、条数、时间跨度。"""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS runs,
+                       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS succeeded,
+                       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_runs,
+                       SUM(fetched) AS fetched,
+                       SUM(failed) AS failed_items,
+                       MIN(started_at) AS first_started_at,
+                       MAX(COALESCE(NULLIF(finished_at, ''), started_at)) AS last_activity_at
+                FROM collection_runs WHERE task_id = ?
+                """,
+                (task_id,),
+            ).fetchone()
+        return {
+            "runs": int(row["runs"] or 0),
+            "succeeded": int(row["succeeded"] or 0),
+            "failed_runs": int(row["failed_runs"] or 0),
+            "fetched": int(row["fetched"] or 0),
+            "failed_items": int(row["failed_items"] or 0),
+            "first_started_at": row["first_started_at"] or "",
+            "last_activity_at": row["last_activity_at"] or "",
+        }
+
+    def list_note_timeline(self, task_id: str) -> list[dict[str, Any]]:
+        """逐条笔记的采集时间线：首次采到、最近一次见到、来自哪个批次。"""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT note_id, title, collected_at, last_seen_at, run_id FROM notes "
+                "WHERE task_id = ? ORDER BY collected_at, rowid",
+                (task_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_notes(self, task_id: str, notes: list[FeedNote], *, run_id: str = "") -> None:
+        """写入笔记。
+
+        collected_at 只在首次入库时落定，后续重复采集只推进 last_seen_at 与 run_id，
+        否则「这条笔记第一次是什么时候采到的」会被下一次采集覆盖掉，审计就失真了。
+        """
+        now = _now()
         with self._connect() as connection:
             connection.executemany(
                 """
-                INSERT OR REPLACE INTO notes(task_id, note_id, title, payload)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO notes(
+                    task_id, note_id, title, payload, collected_at, last_seen_at, run_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id, note_id) DO UPDATE SET
+                    title = excluded.title,
+                    payload = excluded.payload,
+                    last_seen_at = excluded.last_seen_at,
+                    run_id = excluded.run_id
                 """,
                 [
                     (
@@ -168,6 +334,9 @@ class LocalStore:
                         note.note_id,
                         note.title,
                         json.dumps(note.to_dict(), ensure_ascii=False),
+                        now,
+                        now,
+                        run_id,
                     )
                     for note in notes
                 ],
