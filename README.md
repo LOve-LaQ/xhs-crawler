@@ -18,7 +18,7 @@
 
 本仓库的核心。XHS Insight 把底层自动化能力变成**给人用的可视化工作台**——无需手写命令，通过界面完成「采集 → 分析 → 创作 → 归档」的完整链路。
 
-约 4200 行代码，40 项自动化测试。
+自研约 5700 行代码（`desktop/` 4478 行 + `tests/` 1213 行），59 项自动化测试。
 
 ### 技术栈
 
@@ -29,7 +29,7 @@
 | AI | DeepSeek API（OpenAI 兼容协议，`base_url` / `model` 可自定义） |
 | 采集 | 调用 CLI 引擎与 Chrome Extension Bridge（WebSocket） |
 | 导出 | JSON + Excel / HTML / Markdown，按任务归档 |
-| 质量 | 40 项 pytest + Ruff（lint / format），CI 每次 push 自动校验 |
+| 质量 | 59 项 pytest + Ruff（lint / format），CI 每次 push 自动校验（含发布归档打包校验） |
 
 ### 功能模块
 
@@ -85,6 +85,10 @@ Agent 会自动执行：搜索 → 筛选图文 → 按点赞排序 → 收藏 �
 - Google Chrome 浏览器
 
 ### 第一步：安装项目
+
+> 只想用**桌面分析台**的话，直接下载 [Releases](https://github.com/LOve-LaQ/xhs-crawler/releases)
+> 里的 `xhs-crawler-<版本>.tar.gz` / `.zip` 更省事：它带统一目录前缀、已排除缓存文件，
+> 解压后执行 `uv sync` 即可。下面的方式更适合把本项目作为 **Agent Skills** 使用。
 
 **方法一：下载 ZIP（推荐）**
 
@@ -245,6 +249,7 @@ xhs-crawler/
 │   │   ├── settings_dialog.py      #   工作区设置对话框
 │   │   └── style.py                #   全局 QSS
 │   ├── ai_service.py               # DeepSeek 客户端与分析提示词
+│   ├── retrieval.py                # 零依赖 BM25 问答召回
 │   ├── storage.py                  # SQLite 持久化（6 张表）
 │   ├── workspace.py                # 工作区归档与 Excel 导出
 │   ├── xhs_adapter.py              # CLI 适配层
@@ -287,8 +292,10 @@ xhs-crawler/
 │   ├── xhs-explore/SKILL.md
 │   ├── xhs-interact/SKILL.md
 │   └── xhs-content-ops/SKILL.md
-├── tests/                          # desktop 单元测试（40 项）
-├── .github/workflows/              # ci.yml（lint + test）与 release.yml
+├── tests/                          # desktop 单元测试（59 项）
+├── .github/
+│   ├── workflows/                  # ci.yml（lint + test + 归档校验）与 release.yml
+│   └── scripts/                    # 打包与归档校验脚本（发版和 CI 共用同一份清单）
 ├── SKILL.md                        # 技能统一入口（路由到子技能）
 ├── pyproject.toml
 └── README.md
@@ -297,7 +304,7 @@ xhs-crawler/
 ## 开发
 
 ```bash
-uv sync --extra dev        # 安装依赖（含 ruff / pytest 开发工具）
+uv sync                    # 安装依赖（dev 依赖在 [dependency-groups] 中，默认同步）
 uv run ruff check .        # Lint 检查
 uv run ruff format .       # 代码格式化
 uv run pytest              # 运行测试
@@ -311,14 +318,23 @@ $env:QT_QPA_PLATFORM='offscreen'; uv run pytest -q
 
 ### 持续集成
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 在每次 push / PR 到 `main` 时执行四步：
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 在每次 push / PR 到 `main` 时执行两个 job：
 
-1. `uv sync --locked --extra dev` —— 校验锁文件一致性并在其上安装依赖
+**Lint & Test** —— 四步：
+
+1. `uv sync --locked` —— 校验锁文件一致性并在其上安装依赖
 2. `uv run ruff check .` —— Lint 检查
 3. `uv run ruff format --check .` —— 格式检查
 4. `uv run pytest -q` —— 运行单元测试（Qt offscreen 无头模式）
 
 测试不联网、不启动真实浏览器，秒级完成，可直接作为 PR 合入卡点。
+
+**Release Package** —— 用与发版完全相同的脚本打一次包，并校验归档内容：
+
+- 归档必须含 `pyproject.toml` 中声明的构建包（`packages = ["desktop"]`）与入口点目标模块（`desktop.main`），缺一即失败
+
+这一步是为了堵住「打包清单漏文件、发版后才暴露」的问题：归档若缺 `desktop/`，
+下载者执行 `uv sync` 会因找不到 `desktop` 包而构建失败——这类错误以前只有真正发版才会被发现。
 
 > `scripts/` 与 `extension/` 为上游开源代码，已在 `[tool.ruff] extend-exclude` 中排除，
 > 以保留上游基线原貌，让「上游基线」与「本仓库新增」的边界在 diff 中始终清晰。
