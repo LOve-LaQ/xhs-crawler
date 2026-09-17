@@ -49,10 +49,17 @@ class AnalysisMixin:
         if hasattr(self, "collection_topic"):
             self.collection_topic.setText(topic)
         self.current_task_id = self.store.create_task(topic, "内容导入")
+        # 导入没有网络往返，批次当场开、当场结；source 只记文件名，
+        # 免得把本机目录结构写进审计记录。
+        run_id = self.store.start_collection_run(self.current_task_id, "JSON 导入", Path(path).name)
         self.current_notes = notes
-        self.store.save_notes(self.current_task_id, notes)
+        self.store.save_notes(self.current_task_id, notes, run_id=run_id)
         self.store.update_task(self.current_task_id, status="ready", progress=100)
         self.workspace.save_samples(self.current_task_id, topic, notes)
+        self.store.finish_collection_run(
+            run_id, status="success", requested=len(notes), fetched=len(notes)
+        )
+        self._export_collection_log(self.current_task_id)
         self.populate_notes(notes)
         self.populate_collection_notes(notes)
         self._load_tasks()
@@ -85,8 +92,10 @@ class AnalysisMixin:
             self._show_error("请先选择至少一篇笔记")
             return
         topic = self.search_input.text().strip() or "小红书内容分析"
-        self._create_or_reuse_task(topic, self._workflow_task_type("竞品分析"))
-        self.store.update_task(self.current_task_id or "", status="running", progress=15, error="")
+        task_id = self._create_or_reuse_task(topic, self._workflow_task_type("竞品分析"))
+        # 分析开始前会把缺正文的样本逐篇补详情，这也是一次真实取数，同样留痕。
+        self._begin_collection_run(task_id, "详情补全", f"{len(notes)} 篇样本")
+        self.store.update_task(task_id, status="running", progress=15, error="")
         self.analyze_button.setText("分析中...")
         self.set_runtime_status("分析中", 15)
         self.analysis_progress.setValue(15)
@@ -122,7 +131,7 @@ class AnalysisMixin:
         if hasattr(self, "creator_source_summary"):
             self.creator_source_summary.setText(f"创作依据：已分析 {len(notes)} 篇参考样本")
         if self.current_task_id:
-            self.store.save_notes(self.current_task_id, notes)
+            self.store.save_notes(self.current_task_id, notes, run_id=self._active_run_id)
             self.store.save_report(self.current_task_id, report)
             self.store.update_task(self.current_task_id, status="done", progress=100)
             self.workspace.save_samples(
@@ -135,6 +144,13 @@ class AnalysisMixin:
                 notes,
             )
             self._sync_comment_table()
+            # 请求数是选中的样本数（含被跳过的），失败数是详情取不到的篇数。
+            self._finish_collection_run(
+                "success",
+                requested=len(notes) + len(skipped),
+                fetched=len(notes),
+                failed=len(skipped),
+            )
         self.analysis_progress.setValue(100)
         self.set_runtime_status("分析完成", 100)
         self.report_view.setHtml(report_to_html(report, notes))

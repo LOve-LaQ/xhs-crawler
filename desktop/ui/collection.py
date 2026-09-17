@@ -5,7 +5,18 @@ from urllib.parse import quote, urlencode
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QMessageBox, QPushButton, QTableWidget, QTableWidgetItem
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
 
 from ..models import FeedNote
 from .formatting import table_item
@@ -34,6 +45,97 @@ class CollectionMixin:
                     lambda checked=False, value=task: self.open_task_folder(value)
                 )
                 table.setCellWidget(row, 5, action)
+            if table.columnCount() > 6:
+                audit = QPushButton("采集日志")
+                audit.clicked.connect(
+                    lambda checked=False, value=task: self.open_collection_log(value)
+                )
+                table.setCellWidget(row, 6, audit)
+
+    @staticmethod
+    def _readable_time(value: str) -> str:
+        """把 ISO 时间戳裁成能直接读的形态，与任务表的更新时间口径一致。"""
+        return value.replace("T", " ")[:19] if value else "—"
+
+    def open_collection_log(self, task: dict[str, Any]) -> None:
+        """摊开某个任务的采集审计。"""
+        self._build_collection_log_dialog(task).exec()
+
+    def _build_collection_log_dialog(self, task: dict[str, Any]) -> QDialog:
+        """构建采集审计视图：什么时候、以什么方式、采到多少、漏了多少。
+
+        与 open_collection_log 拆开，是为了让测试能直接检查内容，
+        而不必让模态对话框的 exec() 阻塞住测试进程。
+        """
+        task_id = task["id"]
+        runs = self.store.list_collection_runs(task_id)
+        summary = self.store.collection_summary(task_id)
+        timeline = self.store.list_note_timeline(task_id)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"采集日志 · {task['topic']}")
+        dialog.resize(980, 540)
+        layout = QVBoxLayout(dialog)
+
+        if timeline:
+            notes_line = (
+                f"笔记 {len(timeline)} 篇：最早 "
+                f"{self._readable_time(timeline[0]['collected_at'])} 采到，最近 "
+                f"{self._readable_time(max(item['last_seen_at'] for item in timeline))} 见到"
+            )
+        else:
+            notes_line = "暂无笔记入库记录"
+        overview = QLabel(
+            f"共 {summary['runs']} 次取数（成功 {summary['succeeded']} / 失败 "
+            f"{summary['failed_runs']}）；累计入库 {summary['fetched']} 条，"
+            f"取数失败 {summary['failed_items']} 条\n"
+            f"首次采集 {self._readable_time(summary['first_started_at'])}；"
+            f"最近活动 {self._readable_time(summary['last_activity_at'])}\n{notes_line}"
+        )
+        overview.setWordWrap(True)
+        layout.addWidget(overview)
+
+        table = QTableWidget(len(runs), 7)
+        table.setHorizontalHeaderLabels(
+            ["采集方式", "来源", "状态", "开始时间", "结束时间", "成功 / 请求", "说明"]
+        )
+        table.setObjectName("taskTable")
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setVisible(False)
+        for row, run in enumerate(runs):
+            table.setItem(row, 0, table_item(run["action"]))
+            table.setItem(row, 1, table_item(run["source"]))
+            table.setItem(row, 2, table_item(run["status"]))
+            table.setItem(row, 3, table_item(self._readable_time(run["started_at"])))
+            table.setItem(row, 4, table_item(self._readable_time(run["finished_at"])))
+            table.setItem(row, 5, table_item(f"{run['fetched']} / {run['requested']}"))
+            table.setItem(row, 6, table_item(run["message"]))
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        for column in (0, 2, 3, 4, 5):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(table, 1)
+
+        buttons = QDialogButtonBox()
+        export_button = buttons.addButton("导出到工作区", QDialogButtonBox.ButtonRole.ActionRole)
+        buttons.addButton("关闭", QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.rejected.connect(dialog.reject)
+
+        def export() -> None:
+            if not self.workspace.enabled:
+                QMessageBox.information(
+                    dialog, "未设置工作区", "请先在设置里选择工作区目录，再导出采集日志。"
+                )
+                return
+            self._export_collection_log(task_id)
+            self.show_status(f"采集日志已导出到「{task['topic']}」的 logs 文件夹")
+
+        export_button.clicked.connect(export)
+        layout.addWidget(buttons)
+        return dialog
 
     def open_task_folder(self, task: dict[str, Any]) -> None:
         self._sync_comment_table_for_task(task)
@@ -61,6 +163,50 @@ class CollectionMixin:
         self.current_task_id = self.store.create_task(topic, task_type)
         return self.current_task_id
 
+    def _begin_collection_run(self, task_id: str, action: str, source: str = "") -> None:
+        """开启一条采集批次，失败时统一由 _on_task_error 收尾。"""
+        self._active_run_id = self.store.start_collection_run(task_id, action, source)
+
+    def _finish_collection_run(
+        self,
+        status: str,
+        *,
+        requested: int = 0,
+        fetched: int = 0,
+        failed: int = 0,
+        message: str = "",
+    ) -> None:
+        """收尾当前批次，并立刻把日志刷到工作区，避免库里与归档两份记录分叉。"""
+        run_id = getattr(self, "_active_run_id", "")
+        if not run_id:
+            return
+        self.store.finish_collection_run(
+            run_id,
+            status=status,
+            requested=requested,
+            fetched=fetched,
+            failed=failed,
+            message=message,
+        )
+        self._active_run_id = ""
+        self._export_collection_log()
+
+    def _export_collection_log(self, task_id: str = "") -> None:
+        """把采集审计落到工作区 logs/；未启用工作区时静默跳过。"""
+        target = task_id or self.current_task_id
+        if not target or not self.workspace.enabled:
+            return
+        try:
+            task = self.store.get_task(target)
+        except KeyError:  # 任务已被清理，用不着为它留日志
+            return
+        self.workspace.save_collection_log(
+            target,
+            task["topic"],
+            self.store.list_collection_runs(target),
+            self.store.list_note_timeline(target),
+        )
+
     def collect_notes(self) -> None:
         topic = self.search_input.text().strip()
         if not topic:
@@ -68,6 +214,7 @@ class CollectionMixin:
             return
         task_type = self._workflow_task_type("内容采集")
         task_id = self._create_or_reuse_task(topic, task_type)
+        self._begin_collection_run(task_id, "关键词搜索", topic)
         self.store.update_task(task_id, status="running", progress=10, error="")
         self.collect_button.setText("采集中...")
         self.set_runtime_status("采集中", 10)
@@ -93,13 +240,15 @@ class CollectionMixin:
     def _on_search_result(self, notes: list[FeedNote]) -> None:
         self.current_notes = notes
         if self.current_task_id:
-            self.store.save_notes(self.current_task_id, notes)
+            self.store.save_notes(self.current_task_id, notes, run_id=self._active_run_id)
             self.store.update_task(self.current_task_id, status="ready", progress=100)
             self.workspace.save_samples(
                 self.current_task_id,
                 self.search_input.text().strip() or "内容采集",
                 notes,
             )
+            # 搜索接口返回多少就是多少，中间没有重试层，故请求数与实际条数一致。
+            self._finish_collection_run("success", requested=len(notes), fetched=len(notes))
         self.populate_notes(notes)
         self.populate_collection_notes(notes)
         self.set_runtime_status("采集完成", 100)
@@ -110,6 +259,8 @@ class CollectionMixin:
     def _on_task_error(self, message: str) -> None:
         if self.current_task_id:
             self.store.update_task(self.current_task_id, status="error", error=message)
+        # 采集 / 分析 / 评论的 worker 共用这个失败回调，收尾当前进行中的那条批次即可。
+        self._finish_collection_run("failed", message=message)
         self.collect_button.setText("开始采集")
         self.analyze_button.setText("分析选中内容")
         self.set_runtime_status("执行失败", 0)

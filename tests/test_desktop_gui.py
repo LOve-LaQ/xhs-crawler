@@ -1,3 +1,4 @@
+import json
 import os
 import zipfile
 
@@ -8,12 +9,15 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QMainWindow,
+    QTableWidget,
     QTextBrowser,
 )
 
 from desktop import ui
+from desktop.config import AppSettings
 from desktop.main import MainWindow
 from desktop.models import AnalysisReport, FeedNote
 from desktop.storage import LocalStore
@@ -29,8 +33,9 @@ def test_main_window_exposes_workbench_actions(tmp_path) -> None:
     assert window.analyze_button.text() == "分析选中内容"
     assert window.analysis_vertical_splitter.orientation() == Qt.Orientation.Vertical
     assert window.dashboard_vertical_splitter.orientation() == Qt.Orientation.Vertical
-    assert window.analysis_task_table.columnCount() == 6
+    assert window.analysis_task_table.columnCount() == 7
     assert window.analysis_task_table.horizontalHeaderItem(5).text() == "文件夹"
+    assert window.analysis_task_table.horizontalHeaderItem(6).text() == "采集日志"
     window.analysis_vertical_splitter.setSizes([260, 420])
     assert window.analysis_vertical_splitter.sizes()[0] > 0
     assert window.analysis_vertical_splitter.sizes()[1] > 0
@@ -517,6 +522,87 @@ def test_main_window_wires_every_ui_mixin(tmp_path) -> None:
     mro = type(window).__mro__
     qmainwindow_index = mro.index(QMainWindow)
     assert all(mro.index(mixin) < qmainwindow_index for mixin in mixins)
+
+    window.close()
+    app.processEvents()
+
+
+def test_task_table_exposes_collection_audit_dialog(tmp_path) -> None:
+    """任务表要能点开采集日志，且日志里看得出「什么时候采的、采到多少」。"""
+    app = QApplication.instance() or QApplication([])
+    store = LocalStore(tmp_path / "audit.db")
+    window = MainWindow(store=store)
+
+    task_id = store.create_task("通勤效率", "内容采集")
+    run_id = store.start_collection_run(task_id, "关键词搜索", "通勤效率")
+    store.save_notes(task_id, [FeedNote(note_id="n1", title="标题")], run_id=run_id)
+    store.finish_collection_run(
+        run_id, status="success", requested=2, fetched=1, failed=1, message="1 篇详情不可访问"
+    )
+    window._load_tasks()
+
+    audit_button = window.analysis_task_table.cellWidget(0, 6)
+    assert audit_button is not None
+    assert audit_button.text() == "采集日志"
+
+    dialog = window._build_collection_log_dialog(store.get_task(task_id))
+    overview = dialog.findChild(QLabel)
+    assert overview is not None
+    assert "1 次取数" in overview.text()
+    assert "首次采集" in overview.text()
+
+    table = dialog.findChild(QTableWidget)
+    assert table is not None
+    assert table.rowCount() == 1
+    assert table.item(0, 0).text() == "关键词搜索"
+    assert table.item(0, 5).text() == "1 / 2"
+    assert table.item(0, 6).text() == "1 篇详情不可访问"
+
+    window.close()
+    app.processEvents()
+
+
+def test_collection_writes_audit_log_into_workspace(tmp_path) -> None:
+    """点一次采集，工作区 logs/ 里就该留下这次取数的完整回路。"""
+    app = QApplication.instance() or QApplication([])
+    store = LocalStore(tmp_path / "gui.db")
+    workspace_dir = tmp_path / "workspace"
+    window = MainWindow(store=store, settings=AppSettings(workspace_dir=str(workspace_dir)))
+
+    class StubAdapter:
+        def search_feeds(self, keyword: str, sort_by: str = "") -> list[FeedNote]:
+            return [
+                FeedNote(note_id="n1", title="标题"),
+                FeedNote(note_id="n2", title="另一篇"),
+            ]
+
+    window.adapter = StubAdapter()
+
+    def run_inline(function, *, on_result, on_error=None, button=None, **kwargs):
+        # 把 worker 拉回当前线程同步跑，让断言直接看到落盘结果
+        try:
+            result = function(**kwargs)
+        except Exception as exc:  # 与 _run_worker 的失败路径保持一致
+            if on_error:
+                on_error(str(exc))
+            return
+        on_result(result)
+
+    window._run_worker = run_inline
+    window.search_input.setText("通勤效率")
+    window.collect_notes()
+
+    log_json = next((workspace_dir / "logs").glob("*/collection_log.json"))
+    payload = json.loads(log_json.read_text(encoding="utf-8"))
+    assert payload["topic"] == "通勤效率"
+    assert payload["runs"][0]["action"] == "关键词搜索"
+    assert payload["runs"][0]["status"] == "success"
+    assert payload["runs"][0]["fetched"] == 2
+    assert [item["note_id"] for item in payload["notes"]] == ["n1", "n2"]
+    assert payload["notes"][0]["collected_at"] == payload["notes"][0]["last_seen_at"]
+    # 条目能追回它来自哪一批：这就是「什么时候采的」的回路
+    assert payload["notes"][0]["run_id"] == payload["runs"][0]["id"]
+    assert (log_json.parent / "collection_log.xlsx").exists()
 
     window.close()
     app.processEvents()

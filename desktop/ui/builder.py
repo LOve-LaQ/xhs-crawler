@@ -580,12 +580,14 @@ class UiBuilderMixin:
         refresh.clicked.connect(self._load_tasks)
         heading_row.addWidget(refresh)
         panel_layout.addLayout(heading_row)
-        hint = QLabel("查看采集、分析和草稿任务的状态；失败任务会保留错误原因。")
+        hint = QLabel(
+            "查看采集、分析和草稿任务的状态；失败任务会保留错误原因，采集日志可逐批回溯取数时间。"
+        )
         hint.setObjectName("panelSubtitle")
         panel_layout.addWidget(hint)
-        self.analysis_task_table = QTableWidget(0, 6)
+        self.analysis_task_table = QTableWidget(0, 7)
         self.analysis_task_table.setHorizontalHeaderLabels(
-            ["任务名称", "类型", "状态", "进度", "更新时间", "文件夹"]
+            ["任务名称", "类型", "状态", "进度", "更新时间", "文件夹", "采集日志"]
         )
         self.analysis_task_table.setObjectName("taskTable")
         self.analysis_task_table.verticalHeader().setVisible(False)
@@ -593,13 +595,10 @@ class UiBuilderMixin:
         self.analysis_task_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
-        for column in range(1, 5):
+        for column in range(1, 7):
             self.analysis_task_table.horizontalHeader().setSectionResizeMode(
                 column, QHeaderView.ResizeMode.ResizeToContents
             )
-        self.analysis_task_table.horizontalHeader().setSectionResizeMode(
-            5, QHeaderView.ResizeMode.ResizeToContents
-        )
         panel_layout.addWidget(self.analysis_task_table, 1)
         layout.addWidget(panel, 1)
         return page

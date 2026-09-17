@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
@@ -240,6 +241,83 @@ class WorkspaceArchive:
             rows,
             column_widths=[24, 34, 70, 50, 12, 12, 12],
             data_row_height=110,
+        )
+
+    def save_collection_log(
+        self,
+        task_id: str,
+        topic: str,
+        runs: list[dict[str, Any]],
+        notes: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """把采集审计落到 logs/，当作可离线核对的证据链。
+
+        runs 来自 collection_runs、notes 来自 notes 的采集时间线。这里按白名单
+        逐字段挑出来再落盘（与 save_qa_entries 同一原则）：即使上游以后往行里
+        塞了 xsec_token 之类的会话凭据，归档也不会跟着泄露。
+        """
+        folder = self.task_folder("logs", task_id, topic)
+        if not folder:
+            return
+        public_runs = [
+            {
+                "id": run.get("id", ""),
+                "action": run.get("action", ""),
+                "source": run.get("source", ""),
+                "status": run.get("status", ""),
+                "started_at": run.get("started_at", ""),
+                "finished_at": run.get("finished_at", ""),
+                "requested": run.get("requested", 0),
+                "fetched": run.get("fetched", 0),
+                "failed": run.get("failed", 0),
+                "message": run.get("message", ""),
+            }
+            for run in runs
+        ]
+        public_notes = [
+            {
+                "note_id": note.get("note_id", ""),
+                "title": note.get("title", ""),
+                "collected_at": note.get("collected_at", ""),
+                "last_seen_at": note.get("last_seen_at", ""),
+                "run_id": note.get("run_id", ""),
+            }
+            for note in notes or []
+        ]
+        (folder / "collection_log.json").write_text(
+            json.dumps(
+                {
+                    "task_id": task_id,
+                    "topic": topic,
+                    "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                    "runs": public_runs,
+                    "notes": public_notes,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        write_xlsx(
+            folder / "collection_log.xlsx",
+            "采集日志",
+            ["采集方式", "来源", "状态", "开始时间", "结束时间", "请求", "成功", "失败", "说明"],
+            [
+                [
+                    run["action"],
+                    run["source"],
+                    run["status"],
+                    run["started_at"],
+                    run["finished_at"],
+                    run["requested"],
+                    run["fetched"],
+                    run["failed"],
+                    run["message"],
+                ]
+                for run in public_runs
+            ],
+            column_widths=[16, 26, 12, 22, 22, 10, 10, 10, 46],
+            data_row_height=30,
         )
 
     def save_comment_table(

@@ -34,6 +34,7 @@ class CommentsMixin:
         if not self.current_task_id:
             self._show_error("请先搜索或导入帖子，再采集评论")
             return
+        self._begin_collection_run(self.current_task_id, "评论采集", note.title)
         button.setText("采集中...")
         button.setEnabled(False)
         self.show_status(f"正在加载《{note.title}》的评论")
@@ -82,9 +83,17 @@ class CommentsMixin:
             detail if item.note_id == detail.note_id else item for item in self.current_notes
         ]
         if self.current_task_id:
-            self.store.save_notes(self.current_task_id, self.current_notes)
+            self.store.save_notes(
+                self.current_task_id, self.current_notes, run_id=self._active_run_id
+            )
             self.store.save_comment_opportunities(self.current_task_id, opportunities)
             self._sync_comment_table()
+            # 请求数是用户设定的单帖上限，实际能拿到多少由接口决定。
+            self._finish_collection_run(
+                "success",
+                requested=self.collection_comment_limit.value(),
+                fetched=comment_count,
+            )
         self.populate_collection_notes(self.current_notes)
         self.refresh_comment_opportunities()
         self.set_runtime_status("评论已保存", 60)

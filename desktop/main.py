@@ -55,6 +55,7 @@ class MainWindow(
         self.analysis_service = analysis_service or self._make_analysis_service()
         self.thread_pool = QThreadPool.globalInstance()
         self.current_task_id: str | None = None
+        self._active_run_id = ""
         self.current_notes: list[FeedNote] = []
         self.current_report: AnalysisReport | None = None
         self.creator_reference_note_ids: set[str] = set()

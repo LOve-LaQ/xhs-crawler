@@ -130,3 +130,55 @@ def test_workspace_exports_comment_table_to_collection_task_folder(tmp_path) -> 
     )
 
     assert (tmp_path / "workspace" / "samples" / "采集主题_task-2" / "评论表.xlsx").exists()
+
+
+def test_workspace_exports_collection_log_without_session_secrets(tmp_path) -> None:
+    archive = WorkspaceArchive()
+    archive.set_root(tmp_path / "workspace")
+    archive.save_collection_log(
+        "task-1",
+        "通勤效率",
+        [
+            {
+                "id": "run-1",
+                "task_id": "task-1",
+                "action": "关键词搜索",
+                "source": "通勤效率",
+                "status": "success",
+                "started_at": "2026-09-17T02:00:00+00:00",
+                "finished_at": "2026-09-17T02:00:12+00:00",
+                "requested": 20,
+                "fetched": 18,
+                "failed": 2,
+                "message": "2 篇详情不可访问",
+                "xsec_token": "secret-token",
+            }
+        ],
+        [
+            {
+                "note_id": "n1",
+                "title": "标题",
+                "collected_at": "2026-09-17T02:00:05+00:00",
+                "last_seen_at": "2026-09-17T02:00:05+00:00",
+                "run_id": "run-1",
+                "xsec_token": "secret-token",
+            }
+        ],
+    )
+
+    folder = tmp_path / "workspace" / "logs" / "通勤效率_task-1"
+    raw = (folder / "collection_log.json").read_text(encoding="utf-8")
+    payload = json.loads(raw)
+    assert payload["topic"] == "通勤效率"
+    assert payload["runs"][0]["started_at"] == "2026-09-17T02:00:00+00:00"
+    assert payload["runs"][0]["fetched"] == 18
+    assert payload["notes"][0]["run_id"] == "run-1"
+    # 白名单挑字段：即使上游行里混进了会话凭据，归档也不能跟着泄露
+    assert "secret-token" not in raw
+
+    with zipfile.ZipFile(folder / "collection_log.xlsx") as archive_file:
+        sheet = archive_file.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert "采集方式" in sheet
+    assert "关键词搜索" in sheet
+    assert "2026-09-17T02:00:00+00:00" in sheet
+    assert "secret-token" not in sheet

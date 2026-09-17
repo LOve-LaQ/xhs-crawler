@@ -18,27 +18,28 @@
 
 本仓库的核心。XHS Insight 把底层自动化能力变成**给人用的可视化工作台**——无需手写命令，通过界面完成「采集 → 分析 → 创作 → 归档」的完整链路。
 
-自研约 5700 行代码（`desktop/` 4478 行 + `tests/` 1213 行），59 项自动化测试。
+自研约 6400 行代码（`desktop/` 4882 行 + `tests/` 1463 行），65 项自动化测试。
 
 ### 技术栈
 
 | 层次 | 选型 |
 |------|------|
 | 界面 | PySide6（Qt 6）；`desktop/ui/` 按职责拆分为多个 Mixin，`main.py` 仅做组装；`QThreadPool + QRunnable` 承载后台任务，界面不阻塞 |
-| 存储 | SQLite 单文件本地库，启动时自动建表，兼容旧库字段迁移 |
+| 存储 | SQLite 单文件本地库，启动自动建表 + 旧库字段迁移；开启 WAL / `busy_timeout` / `foreign_keys`，后台任务写入不再阻塞界面读取；`collection_runs` 表逐批记录取数审计 |
 | AI | DeepSeek API（OpenAI 兼容协议，`base_url` / `model` 可自定义） |
 | 采集 | 调用 CLI 引擎与 Chrome Extension Bridge（WebSocket） |
 | 导出 | JSON + Excel / HTML / Markdown，按任务归档 |
-| 质量 | 59 项 pytest + Ruff（lint / format），CI 每次 push 自动校验（含发布归档打包校验） |
+| 质量 | 65 项 pytest + Ruff（lint / format），CI 每次 push 自动校验（含发布归档打包校验） |
 
 ### 功能模块
 
 - **内容采集台** — 按主题搜索笔记，或导入 `search-feeds` 输出的 JSON；批量拉取正文与评论，单条笔记失效不会中断整批
+- **采集可回溯** — 每次取数（关键词搜索 / JSON 导入 / 评论采集 / 分析前详情补全）都留下一批记录：起止时间、来源、成功与失败条数；每条笔记另行保留「首次采到」与「最近一次见到」的时间及来源批次，任务表可一键查看并导出到 `logs/`
 - **评论运营工作台** — 将采集到的评论整理为待处理列表，AI 生成回复建议并给出 100 分制评分（需求明确度 / 回复匹配度 / 事实依据 / 自然度 / 承接潜力），支持人工润色后手动执行
 - **AI 内容分析** — 对样本做竞品分析，输出结构化报告，可导出 HTML / Markdown / Excel
 - **批量草稿创作** — 结合参考样本、本地配图目录与产品资料，一次生成多篇草稿
 - **Q&A 问答库** — 沉淀问答素材，作为 AI 生成时的依据，支持增删与导出
-- **工作区归档** — 任务产物按 `samples/` `reports/` `drafts/` `qa/` 落盘为 JSON + Excel，一键打开任务文件夹
+- **工作区归档** — 任务产物按 `samples/` `reports/` `drafts/` `logs/` `qa/` 落盘为 JSON + Excel，一键打开任务文件夹
 
 ### 启动
 
@@ -55,7 +56,7 @@ uv run python -m desktop
 
 - 应用数据保存在 `%APPDATA%\XHS Insight`，API Key 仅存于本地 `config.json`，不会外发
 - 发往 DeepSeek 的内容统一经 `desktop/models.py` 的 `sanitize_for_ai()` 清洗，`xsec_token`、cookie 等会话凭据不外发
-- 导出到工作区的 JSON / Excel 同样剔除会话字段
+- 导出到工作区的 JSON / Excel 同样剔除会话字段；采集审计按白名单挑字段落盘，会话凭据不进归档
 - 全程遵循「人工确认、不自动发布」的边界
 
 ## 功能概览
