@@ -236,5 +236,12 @@ PROJECT_HANDOFF.md
 /AGENTS.md
 /CLAUDE.md
 
+# Qoder 项目技能（本机开发仪式，与上面同类，不入公开仓库）
+/.qoder/
+
 # 早期界面原型稿
 /prototype/
+
+# 本地复现发版打包的临时产物（正式归档由 CI 生成）
+/ci-check.tar.gz
+/ci-check.zip
