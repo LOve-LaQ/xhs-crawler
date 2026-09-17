@@ -21,6 +21,14 @@ tar czf "${PREFIX}.tar.gz" \
   --exclude='__pycache__' --exclude='*.pyc' \
   "${INCLUDE[@]}"
 
-zip -qr "${PREFIX}.zip" "${INCLUDE[@]}" -x '*.pyc' '__pycache__/*'
+echo "已生成 ${PREFIX}.tar.gz"
 
-echo "已生成 ${PREFIX}.tar.gz 与 ${PREFIX}.zip"
+# Windows 本机（含 Git for Windows）不带 zip，缺失时只跳过 .zip 并明确告知，
+# 这样本地也能跑通 tar 一侧；CI 的 ubuntu runner 一定有 zip，
+# 万一将来缺失，ci.yml 中对 .zip 的校验会因文件不存在而失败，不会被静默放过。
+if command -v zip >/dev/null 2>&1; then
+  zip -qr "${PREFIX}.zip" "${INCLUDE[@]}" -x '*.pyc' '__pycache__/*'
+  echo "已生成 ${PREFIX}.zip"
+else
+  echo "::warning::未找到 zip，已跳过 ${PREFIX}.zip（仅生成 .tar.gz）"
+fi
