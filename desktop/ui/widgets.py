@@ -26,11 +26,23 @@ class Worker(QRunnable):
     def run(self) -> None:
         try:
             result = self.function(*self.args, **self.kwargs)
-            self.signals.result.emit(result)
+            self._emit("result", result)
         except Exception as exc:  # Qt worker boundary must forward errors to the UI.
-            self.signals.error.emit(str(exc))
+            self._emit("error", str(exc))
         finally:
-            self.signals.finished.emit()
+            self._emit("finished")
+
+    def _emit(self, name: str, *args: Any) -> None:
+        """窗口先于 worker 销毁时 WorkerSignals 已失效，结果无人接收，静默丢弃。
+
+        closeEvent 里的 waitForDone 只能等已入队的任务，像 QTimer 那样在关窗后
+        才启动的 worker 仍会 emit 到一个已删除的 C++ 对象上，进而在后台线程里
+        冒出 RuntimeError traceback，很容易被误读成真实故障。
+        """
+        try:
+            getattr(self.signals, name).emit(*args)
+        except RuntimeError:
+            return
 
 
 class DragSplitterHandle(QSplitterHandle):
