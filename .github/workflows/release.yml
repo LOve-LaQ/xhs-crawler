@@ -41,22 +41,13 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # 打包清单统一放在 .github/scripts/package_release.sh：CI 的归档校验调用同一份脚本，
+      # 避免「发版清单」与「校验清单」各写一份之后逐渐漂移。
+      # 用 bash 显式调用，不依赖文件的执行位（Windows 上无法设置）
       - name: Package source
         if: steps.check_tag.outputs.exists == 'false'
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          PREFIX="xhs-crawler-${TAG}"
-          # desktop/ 与 extension/ 必须一并打包：包内 pyproject.toml 声明了
-          # xhs-insight = desktop.main:main 且 packages = ["desktop"]，
-          # 缺失会让下载者执行 uv sync 时因找不到 desktop 包而构建失败；
-          # extension/ 是桌面端浏览器桥接的运行前提
-          tar czf "${PREFIX}.tar.gz" \
-            --transform "s,^,${PREFIX}/," \
-            --exclude='__pycache__' --exclude='*.pyc' \
-            skills/ scripts/ desktop/ extension/ SKILL.md pyproject.toml uv.lock LICENSE README.md
-          zip -r "${PREFIX}.zip" \
-            skills/ scripts/ desktop/ extension/ SKILL.md pyproject.toml uv.lock LICENSE README.md \
-            -x '*.pyc' '__pycache__/*'
+          bash .github/scripts/package_release.sh "xhs-crawler-${{ steps.version.outputs.tag }}"
 
       - name: Create GitHub Release
         if: steps.check_tag.outputs.exists == 'false'
@@ -65,8 +56,47 @@ jobs:
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           PREFIX="xhs-crawler-${TAG}"
+          # 这个 Release 的存在意义就是给别人下载运行，因此正文必须写清下一步怎么装：
+          # 只有变更日志时，下载者拿到包也不知道要 uv sync、要加载 extension/。
+          # gh 官方文档：--notes 的内容会被「前置」到 --generate-notes 生成的变更日志之前，
+          # 所以两者共用：固定的安装说明 + 自动生成的本次变更范围。
+          NOTES=$(cat <<'RELEASE_NOTES_EOF'
+          ## 快速开始
+
+          1. 解压后在目录内安装依赖：
+
+             ```bash
+             uv sync
+             ```
+
+          2. 打开 Chrome → 地址栏输入 `chrome://extensions/` → 右上角开启「开发者模式」→
+             点「加载已解压的扩展程序」→ 选择本包的 `extension/` 目录
+          3. 启动桌面端：
+
+             ```bash
+             uv run xhs-insight
+             ```
+
+             若入口点未安装，也可用模块方式启动：`uv run python -m desktop`
+          4. 在「工作区设置」中填写 DeepSeek API 地址、API Key 与模型
+
+          ## 前置条件
+
+          - Python >= 3.11 与 [uv](https://docs.astral.sh/uv/)
+          - Google Chrome（采集依赖扩展在浏览器内执行）
+
+          ## 说明
+
+          - `skills/`、`scripts/`、`extension/` 为上游部分，版权归 Auto-Claw-CC（MIT）；
+            `desktop/`、`tests/` 为本仓库新增
+          - 采集使用你自己的浏览器登录态，请控制使用频率；评论环节只生成建议，需人工确认后手动发布
+          - 应用数据保存在 `%APPDATA%\XHS Insight`，API Key 仅存本地；发往大模型的内容先经
+            `sanitize_for_ai()` 脱敏
+          RELEASE_NOTES_EOF
+          )
           gh release create "$TAG" \
             "${PREFIX}.tar.gz" \
             "${PREFIX}.zip" \
             --title "$TAG" \
+            --notes "$NOTES" \
             --generate-notes

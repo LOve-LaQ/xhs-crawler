@@ -47,3 +47,27 @@ jobs:
 
       - name: Test (pytest)
         run: uv run pytest -q
+
+  release-package:
+    name: Release Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 与 release.yml 共用同一个打包脚本：清单只有一份，不会与发版流程脱节
+      - name: Build release archives
+        run: bash .github/scripts/package_release.sh ci-check
+
+      # tomllib 需要 Python 3.11+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 归档必须自带 pyproject 声明的构建包与入口点目标，否则下载者 uv sync 会构建失败
+      - name: Verify archives
+        run: |
+          python .github/scripts/verify_release_package.py ci-check.tar.gz
+          python .github/scripts/verify_release_package.py ci-check.zip
